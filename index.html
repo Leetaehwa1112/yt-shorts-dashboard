@@ -619,6 +619,7 @@ async function loadAll(forceRefresh = false) {
   }
 
   allVideos.sort((a, b) => b.views - a.views);
+  allVideos.splice(30); // 탑 30개만 유지
 
   const fetchedAt = Date.now();
   saveVideoCache(dateStr, allVideos, errors);
