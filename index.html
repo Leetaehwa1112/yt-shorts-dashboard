@@ -510,15 +510,16 @@ function loadVideoCache(dateStr) {
     const raw = localStorage.getItem(VIDEO_CACHE_KEY);
     if (!raw) return null;
     const c = JSON.parse(raw);
+    if (c.date !== dateStr) return null;        // 날짜 다르면 miss
+    if (c.channelsKey !== channels.join(',')) return null; // 채널 바뀌면 miss
+    // 같은 날이면 시간 무관하게 캐시 사용 (탭 껐다켰다해도 재fetch 없음)
     const elapsed = Date.now() - c.fetchedAt;
-    if (c.date !== dateStr) return null;
-    if (c.channelsKey !== channels.join(',')) return null;
-    if (elapsed >= CACHE_TTL_MS) return null;
+    const remainingSec = Math.max(0, Math.floor((CACHE_TTL_MS - elapsed) / 1000));
     return {
       videos: c.videos.map(v => ({ ...v, publishedAt: new Date(v.publishedAt) })),
       errors: c.errors || [],
       fetchedAt: c.fetchedAt,
-      remainingSec: Math.max(1, Math.floor((CACHE_TTL_MS - elapsed) / 1000)),
+      remainingSec, // 0이면 resetCountdown이 즉시 백그라운드 갱신 트리거
     };
   } catch(e) { return null; }
 }
@@ -630,12 +631,24 @@ function resetCountdown(initialSec = REFRESH_INTERVAL) {
   clearInterval(refreshTimer);
   countdownVal = initialSec;
   const el = document.getElementById('countdown');
+
+  // 캐시가 이미 30분 이상 됐으면 즉시 백그라운드 갱신 (화면은 캐시 유지)
+  if (countdownVal <= 0) {
+    el.textContent = '갱신 중...';
+    loadAll(true);
+    return;
+  }
+
+  // 초기값 즉시 표시
+  const m0 = Math.floor(countdownVal / 60), s0 = countdownVal % 60;
+  el.textContent = `다음 갱신까지 ${m0}:${String(s0).padStart(2, '0')}`;
+
   refreshTimer = setInterval(() => {
     countdownVal--;
     const m = Math.floor(countdownVal / 60);
     const s = countdownVal % 60;
     el.textContent = `다음 갱신까지 ${m}:${String(s).padStart(2, '0')}`;
-    if (countdownVal <= 0) loadAll();
+    if (countdownVal <= 0) loadAll(true); // 타이머 만료 시 항상 강제 갱신
   }, 1000);
 }
 
