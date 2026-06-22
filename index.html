@@ -237,7 +237,7 @@
   <div class="header-right">
     <div style="display:flex; gap:8px; align-items:center;">
       <button onclick="showApiSetup()" title="API 키 설정" style="background:#1a1a1a;border:1px solid #2e2e2e;color:#888;border-radius:6px;padding:7px 10px;cursor:pointer;font-size:0.82rem;">⚙️</button>
-      <button class="refresh-btn" id="refreshBtn" onclick="loadAll()">새로고침</button>
+      <button class="refresh-btn" id="refreshBtn" onclick="loadAll(true)">새로고침</button>
     </div>
     <div class="countdown" id="countdown"></div>
   </div>
@@ -287,6 +287,8 @@ const API_STORAGE = 'yt_api_key';
 let API_KEY = localStorage.getItem(API_STORAGE) || '';
 const STORAGE_KEY = 'yt_dashboard_channels';
 const REFRESH_INTERVAL = 30 * 60; // 30분 (초)
+const VIDEO_CACHE_KEY = 'yt_video_cache';
+const CACHE_TTL_MS = REFRESH_INTERVAL * 1000;
 
 // API 키 설정 (코드에 박지 않고 브라우저에 저장)
 function showApiSetup() {
@@ -490,13 +492,103 @@ function timeAgo(date) {
   return Math.floor(m / 1440) + '일 전';
 }
 
+// 영상 캐시 저장/로드
+function saveVideoCache(dateStr, videos, errors) {
+  try {
+    localStorage.setItem(VIDEO_CACHE_KEY, JSON.stringify({
+      date: dateStr,
+      channelsKey: channels.join(','),
+      fetchedAt: Date.now(),
+      videos: videos.map(v => ({ ...v, publishedAt: v.publishedAt.toISOString() })),
+      errors,
+    }));
+  } catch(e) {}
+}
+
+function loadVideoCache(dateStr) {
+  try {
+    const raw = localStorage.getItem(VIDEO_CACHE_KEY);
+    if (!raw) return null;
+    const c = JSON.parse(raw);
+    const elapsed = Date.now() - c.fetchedAt;
+    if (c.date !== dateStr) return null;
+    if (c.channelsKey !== channels.join(',')) return null;
+    if (elapsed >= CACHE_TTL_MS) return null;
+    return {
+      videos: c.videos.map(v => ({ ...v, publishedAt: new Date(v.publishedAt) })),
+      errors: c.errors || [],
+      fetchedAt: c.fetchedAt,
+      remainingSec: Math.max(1, Math.floor((CACHE_TTL_MS - elapsed) / 1000)),
+    };
+  } catch(e) { return null; }
+}
+
+// 렌더 (캐시/신규 공통)
+function renderResult(allVideos, dateStr, errors, fetchedAtMs) {
+  const contentEl  = document.getElementById('content');
+  const summaryEl  = document.getElementById('summaryBar');
+  const refreshBtn = document.getElementById('refreshBtn');
+
+  const ts = new Date(fetchedAtMs);
+  document.getElementById('lastUpdated').textContent =
+    `업데이트: ${ts.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+
+  summaryEl.textContent = `📹 총 ${allVideos.length}개 영상  ·  ${channels.length}개 채널  ·  ${dateStr}`;
+
+  let html = '<div class="video-list">';
+  if (errors.length) {
+    html += `<div class="error-box">⚠️ 오류: ${errors.join(' &nbsp;|&nbsp; ')}</div>`;
+  }
+  if (!allVideos.length) {
+    html += `<div class="empty">📭 ${dateStr}에 업로드된 영상이 없습니다.</div>`;
+  } else {
+    allVideos.forEach((v, i) => {
+      const n = i + 1;
+      const rankClass = n === 1 ? 'gold' : n === 2 ? 'silver' : n === 3 ? 'bronze' : '';
+      const rankLabel = n === 1 ? '🥇' : n === 2 ? '🥈' : n === 3 ? '🥉' : n;
+      html += `
+        <div class="video-card">
+          <div class="rank ${rankClass}">${rankLabel}</div>
+          <img class="thumb" src="${v.thumbnail}" alt="" loading="lazy" onerror="this.style.background='#1e1e1e';this.style.display='block'">
+          <div class="info">
+            <div class="channel-badge">${v.channelName}</div>
+            <div class="video-title">
+              <a href="https://www.youtube.com/watch?v=${v.id}" target="_blank" rel="noopener">${v.title}</a>
+            </div>
+            <div class="stats">
+              <span class="views">👁 ${fmtViews(v.views)}</span>
+              <span>🕐 ${timeAgo(v.publishedAt)}</span>
+              <button onclick="sendToAlphacut('${v.id}')" title="URL 복사 + 알파컷 열기" style="margin-left:auto; background:#2a1a2e; border:1px solid #4a2a52; color:#d090e0; border-radius:6px; padding:3px 10px; cursor:pointer; font-size:0.72rem;">✂️ 알파컷</button>
+            </div>
+          </div>
+        </div>`;
+    });
+  }
+  html += '</div>';
+  contentEl.innerHTML = html;
+
+  refreshBtn.disabled = false;
+  isLoading = false;
+}
+
 // 메인 로드
-async function loadAll() {
+async function loadAll(forceRefresh = false) {
   if (isLoading) return;
   if (!API_KEY) { showApiSetup(); return; }
-  isLoading = true;
 
   const dateStr = dateInput.value;
+
+  // 캐시 히트: 30분 이내 같은 날짜+채널목록 데이터면 API 호출 없이 바로 렌더
+  if (!forceRefresh) {
+    const cached = loadVideoCache(dateStr);
+    if (cached) {
+      renderResult(cached.videos, dateStr, cached.errors, cached.fetchedAt);
+      resetCountdown(cached.remainingSec);
+      return;
+    }
+  }
+
+  isLoading = true;
   const contentEl  = document.getElementById('content');
   const summaryEl  = document.getElementById('summaryBar');
   const refreshBtn = document.getElementById('refreshBtn');
@@ -527,58 +619,16 @@ async function loadAll() {
 
   allVideos.sort((a, b) => b.views - a.views);
 
-  // 업데이트 시각
-  const now = new Date();
-  document.getElementById('lastUpdated').textContent =
-    `업데이트: ${now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
-
-  summaryEl.textContent = `📹 총 ${allVideos.length}개 영상  ·  ${channels.length}개 채널  ·  ${dateStr}`;
-
-  // 렌더
-  let html = '<div class="video-list">';
-
-  if (errors.length) {
-    html += `<div class="error-box">⚠️ 오류: ${errors.join(' &nbsp;|&nbsp; ')}</div>`;
-  }
-
-  if (!allVideos.length) {
-    html += `<div class="empty">📭 ${dateStr}에 업로드된 영상이 없습니다.</div>`;
-  } else {
-    allVideos.forEach((v, i) => {
-      const n = i + 1;
-      const rankClass = n === 1 ? 'gold' : n === 2 ? 'silver' : n === 3 ? 'bronze' : '';
-      const rankLabel = n === 1 ? '🥇' : n === 2 ? '🥈' : n === 3 ? '🥉' : n;
-      html += `
-        <div class="video-card">
-          <div class="rank ${rankClass}">${rankLabel}</div>
-          <img class="thumb" src="${v.thumbnail}" alt="" loading="lazy" onerror="this.style.background='#1e1e1e';this.style.display='block'">
-          <div class="info">
-            <div class="channel-badge">${v.channelName}</div>
-            <div class="video-title">
-              <a href="https://www.youtube.com/watch?v=${v.id}" target="_blank" rel="noopener">${v.title}</a>
-            </div>
-            <div class="stats">
-              <span class="views">👁 ${fmtViews(v.views)}</span>
-              <span>🕐 ${timeAgo(v.publishedAt)}</span>
-              <button onclick="sendToAlphacut('${v.id}')" title="URL 복사 + 알파컷 열기" style="margin-left:auto; background:#2a1a2e; border:1px solid #4a2a52; color:#d090e0; border-radius:6px; padding:3px 10px; cursor:pointer; font-size:0.72rem;">✂️ 알파컷</button>
-            </div>
-          </div>
-        </div>`;
-    });
-  }
-
-  html += '</div>';
-  contentEl.innerHTML = html;
-
-  refreshBtn.disabled = false;
-  isLoading = false;
+  const fetchedAt = Date.now();
+  saveVideoCache(dateStr, allVideos, errors);
+  renderResult(allVideos, dateStr, errors, fetchedAt);
   resetCountdown();
 }
 
 // 카운트다운
-function resetCountdown() {
+function resetCountdown(initialSec = REFRESH_INTERVAL) {
   clearInterval(refreshTimer);
-  countdownVal = REFRESH_INTERVAL;
+  countdownVal = initialSec;
   const el = document.getElementById('countdown');
   refreshTimer = setInterval(() => {
     countdownVal--;
