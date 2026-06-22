@@ -445,8 +445,7 @@ async function getChannelInfo(handle) {
   const ch = data.items[0];
   const info = { name: ch.snippet.title, playlistId: ch.contentDetails.relatedPlaylists.uploads };
   channelCache[handle] = info;
-  store[handle] = info;
-  try { localStorage.setItem(CH_INFO_CACHE_KEY, JSON.stringify(store)); } catch {}
+  // localStorage 저장은 병렬 완료 후 배치로 (race condition 방지)
   return info;
 }
 
@@ -622,6 +621,12 @@ async function loadAll(forceRefresh = false) {
     if (r.status === 'fulfilled') allVideos.push(...r.value);
     else errors.push(`${channels[i]}: ${r.reason?.message || r.reason}`);
   });
+  // 병렬 완료 후 channelCache 전체를 한 번에 localStorage 저장 (race condition 방지)
+  try {
+    const store = getChInfoStore();
+    Object.assign(store, channelCache);
+    localStorage.setItem(CH_INFO_CACHE_KEY, JSON.stringify(store));
+  } catch {}
 
   // 조회수 일괄 조회
   if (allVideos.length) {
