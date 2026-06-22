@@ -313,14 +313,43 @@ function sendToAlphacut(videoId) {
   window.open('https://alphacut.video/my_project#yt=' + encodeURIComponent(url), '_blank', 'noopener');
 }
 
-// 기본 채널 목록
+// 기본 채널 목록 (YouTube API로 검증된 핸들)
 const DEFAULT_CHANNELS = [
-  '@SPEAKS_TV',
-  '@JTBCSHOW',
-  '@백운기의정어리TV',
+  '@speaks_tv',          // 스픽스
+  '@ssroad',             // 김성수TV 성수대로
+  '@tv-yc8no',           // 최한욱TV
+  '@tv70',               // 김두일tv
+  '@sisasuddenrush',     // 시사급발진
+  '@정치타파tv-2424',     // 정치타파TV
+  '@tv-og5md',           // 이송원TV
+  '@시사의품격',          // 시사의품격
+  '@repoacttv',          // TV허재현
+  '@thekyunghyangtv',    // 경향TV
+  '@sisagungun',         // 시사건건
+  '@ohmynewstv',         // 오마이TV
+  '@jtbcshow',           // 장르만 여의도
+  '@newtamsa',           // 뉴탐사
+  '@취재편의점',          // 장윤선의 취재편의점
+  '@handoozani',         // 한두자니S2
+  '@sisaineditor',       // 시사IN
+  '@백운기의정어리tv',     // 백운기의 정어리TV
 ];
 
-let channels = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') || [...DEFAULT_CHANNELS];
+// 목록 버전: 올리면 기존 브라우저도 이 기본 목록으로 1회 갱신됨
+const CHANNELS_VERSION = '2026-06-22-v2';
+
+let channels;
+(function initChannels() {
+  const storedVer = localStorage.getItem('yt_channels_version');
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored && storedVer === CHANNELS_VERSION) {
+    channels = JSON.parse(stored);
+  } else {
+    channels = [...DEFAULT_CHANNELS];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(channels));
+    localStorage.setItem('yt_channels_version', CHANNELS_VERSION);
+  }
+})();
 let channelCache = {};
 let refreshTimer;
 let countdownVal = REFRESH_INTERVAL;
