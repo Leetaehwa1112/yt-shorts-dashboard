@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>채널 영상 순위</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', sans-serif;
+      background: #0d0d0d;
+      color: #e0e0e0;
+      min-height: 100vh;
+    }
+
+    header {
+      padding: 18px 24px;
+      border-bottom: 1px solid #1f1f1f;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      background: #0d0d0d;
+      z-index: 10;
+    }
+
+    .header-left h1 { font-size: 1.1rem; font-weight: 700; letter-spacing: -0.02em; }
+    .header-left .sub { font-size: 0.75rem; color: #555; margin-top: 3px; }
+
+    .header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+
+    .refresh-btn {
+      background: #ff2d2d;
+      color: #fff;
+      border: none;
+      padding: 7px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.82rem;
+      font-weight: 600;
+      transition: background 0.15s;
+    }
+    .refresh-btn:hover { background: #e00; }
+    .refresh-btn:disabled { background: #444; cursor: default; }
+
+    .countdown { font-size: 0.72rem; color: #555; }
+
+    .controls {
+      padding: 12px 24px;
+      border-bottom: 1px solid #1a1a1a;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .controls label { font-size: 0.82rem; color: #777; }
+
+    .controls input[type="date"] {
+      background: #1a1a1a;
+      border: 1px solid #2e2e2e;
+      color: #e0e0e0;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      cursor: pointer;
+    }
+
+    .summary-bar {
+      padding: 8px 24px;
+      font-size: 0.75rem;
+      color: #444;
+      border-bottom: 1px solid #151515;
+    }
+
+    /* 카드 리스트 */
+    .video-list {
+      padding: 16px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .video-card {
+      background: #161616;
+      border: 1px solid #202020;
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      transition: border-color 0.15s;
+    }
+    .video-card:hover { border-color: #333; }
+
+    .rank {
+      font-size: 1.1rem;
+      font-weight: 800;
+      min-width: 32px;
+      text-align: center;
+      padding-top: 4px;
+      color: #3a3a3a;
+    }
+    .rank.gold   { color: #ffd700; }
+    .rank.silver { color: #c0c0c0; }
+    .rank.bronze { color: #cd7f32; }
+
+    .thumb {
+      width: 128px;
+      min-width: 128px;
+      height: 72px;
+      border-radius: 6px;
+      object-fit: cover;
+      background: #1e1e1e;
+    }
+
+    .info { flex: 1; min-width: 0; }
+
+    .channel-badge {
+      display: inline-block;
+      font-size: 0.68rem;
+      color: #999;
+      background: #202020;
+      padding: 2px 7px;
+      border-radius: 4px;
+      margin-bottom: 5px;
+    }
+
+    .video-title {
+      font-size: 0.9rem;
+      font-weight: 500;
+      line-height: 1.45;
+      margin-bottom: 7px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .video-title a { color: #ddd; text-decoration: none; }
+    .video-title a:hover { color: #fff; text-decoration: underline; }
+
+    .stats {
+      display: flex;
+      gap: 14px;
+      font-size: 0.77rem;
+      color: #666;
+    }
+    .views { color: #ff8c00; font-weight: 700; }
+
+    /* 로딩 */
+    .loading {
+      text-align: center;
+      padding: 80px 24px;
+      color: #444;
+    }
+    .spinner {
+      width: 32px; height: 32px;
+      border: 3px solid #222;
+      border-top-color: #ff2d2d;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 0 auto 14px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* 에러 */
+    .error-box {
+      margin: 0 0 10px;
+      background: #1e1010;
+      border: 1px solid #3d1a1a;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 0.8rem;
+      color: #ff7777;
+    }
+
+    /* 없음 */
+    .empty {
+      text-align: center;
+      padding: 80px 24px;
+      color: #444;
+      font-size: 0.9rem;
+    }
+
+    /* 채널 관리 패널 */
+    .channel-panel {
+      margin: 0 24px 10px;
+      background: #161616;
+      border: 1px solid #222;
+      border-radius: 10px;
+      padding: 14px;
+    }
+    .channel-panel h3 { font-size: 0.82rem; color: #777; margin-bottom: 10px; }
+    .channel-tags { display: flex; flex-wrap: wrap; gap: 7px; }
+    .channel-tag {
+      display: flex; align-items: center; gap: 5px;
+      background: #202020; border: 1px solid #2e2e2e;
+      border-radius: 6px; padding: 4px 9px;
+      font-size: 0.78rem; color: #bbb;
+    }
+    .channel-tag .remove {
+      cursor: pointer; color: #555; font-size: 0.9rem; line-height: 1;
+      transition: color 0.1s;
+    }
+    .channel-tag .remove:hover { color: #ff5555; }
+    .add-channel-row { display: flex; gap: 7px; margin-top: 10px; }
+    .add-channel-row input {
+      flex: 1; background: #1a1a1a; border: 1px solid #2e2e2e;
+      color: #e0e0e0; padding: 6px 10px; border-radius: 6px; font-size: 0.8rem;
+    }
+    .add-channel-row input::placeholder { color: #444; }
+    .add-channel-row button {
+      background: #252525; border: 1px solid #333; color: #aaa;
+      padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 0.8rem;
+    }
+    .add-channel-row button:hover { background: #2e2e2e; color: #fff; }
+
+    .toggle-panel-btn {
+      background: none; border: none; color: #555; font-size: 0.78rem;
+      cursor: pointer; padding: 0; text-decoration: underline;
+    }
+    .toggle-panel-btn:hover { color: #aaa; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <h1>📊 채널 영상 순위</h1>
+    <div class="sub" id="lastUpdated">-</div>
+  </div>
+  <div class="header-right">
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button onclick="showApiSetup()" title="API 키 설정" style="background:#1a1a1a;border:1px solid #2e2e2e;color:#888;border-radius:6px;padding:7px 10px;cursor:pointer;font-size:0.82rem;">⚙️</button>
+      <button class="refresh-btn" id="refreshBtn" onclick="loadAll()">새로고침</button>
+    </div>
+    <div class="countdown" id="countdown"></div>
+  </div>
+</header>
+
+<div id="apiSetup" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:100; align-items:center; justify-content:center;">
+  <div style="background:#161616; border:1px solid #2a2a2a; border-radius:12px; padding:28px; max-width:440px; width:90%;">
+    <h2 style="font-size:1.05rem; margin-bottom:8px;">🔑 YouTube API 키 입력</h2>
+    <p style="font-size:0.82rem; color:#888; line-height:1.6; margin-bottom:16px;">
+      이 도구는 YouTube Data API 키가 필요합니다. 한 번 입력하면 이 브라우저에 저장돼요.<br>
+      <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:#6ab0ff;">구글 클라우드 콘솔에서 발급 →</a>
+    </p>
+    <input type="text" id="apiKeyInput" placeholder="AIza..." onkeydown="if(event.key==='Enter') saveApiKey()" style="width:100%; box-sizing:border-box; background:#1a1a1a; border:1px solid #2e2e2e; color:#e0e0e0; padding:10px 12px; border-radius:8px; font-size:0.85rem; margin-bottom:14px;">
+    <div style="display:flex; gap:8px; justify-content:flex-end;">
+      <button onclick="closeApiSetup()" style="background:#222; border:1px solid #333; color:#999; padding:8px 14px; border-radius:8px; cursor:pointer;">취소</button>
+      <button onclick="saveApiKey()" style="background:#ff2d2d; border:none; color:#fff; padding:8px 18px; border-radius:8px; cursor:pointer; font-weight:600;">저장</button>
+    </div>
+  </div>
+</div>
+
+<div class="controls">
+  <label>날짜</label>
+  <input type="date" id="dateInput" onchange="loadAll()">
+  <button class="toggle-panel-btn" onclick="togglePanel()">채널 관리 ▾</button>
+</div>
+
+<div class="channel-panel" id="channelPanel" style="display:none;">
+  <h3>모니터링 채널 목록</h3>
+  <div class="channel-tags" id="channelTags"></div>
+  <div class="add-channel-row">
+    <input type="text" id="newChannelInput" placeholder="@채널핸들 또는 채널명" onkeydown="if(event.key==='Enter') addChannel()">
+    <button onclick="addChannel()">추가</button>
+  </div>
+</div>
+
+<div class="summary-bar" id="summaryBar"> </div>
+
+<div id="content">
+  <div class="loading">
+    <div class="spinner"></div>
+    <div>채널 데이터 불러오는 중...</div>
+  </div>
+</div>
+
+<script>
+const API_STORAGE = 'yt_api_key';
+let API_KEY = localStorage.getItem(API_STORAGE) || '';
+const STORAGE_KEY = 'yt_dashboard_channels';
+const REFRESH_INTERVAL = 30 * 60; // 30분 (초)
+
+// API 키 설정 (코드에 박지 않고 브라우저에 저장)
+function showApiSetup() {
+  document.getElementById('apiKeyInput').value = API_KEY || '';
+  document.getElementById('apiSetup').style.display = 'flex';
+  setTimeout(() => document.getElementById('apiKeyInput').focus(), 50);
+}
+function closeApiSetup() {
+  document.getElementById('apiSetup').style.display = 'none';
+}
+function saveApiKey() {
+  const v = document.getElementById('apiKeyInput').value.trim();
+  if (!v) return;
+  API_KEY = v;
+  localStorage.setItem(API_STORAGE, v);
+  channelCache = {};
+  closeApiSetup();
+  loadAll();
+}
+
+// 선택 영상 → 알파컷으로 (URL 복사 + 알파컷 열기)
+function sendToAlphacut(videoId) {
+  const url = 'https://www.youtube.com/watch?v=' + videoId;
+  if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {});
+  window.open('https://alphacut.video/my_project', '_blank', 'noopener');
+}
+
+// 기본 채널 목록
+const DEFAULT_CHANNELS = [
+  '@SPEAKS_TV',
+  '@JTBCSHOW',
+  '@백운기의정어리TV',
+];
+
+let channels = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null') || [...DEFAULT_CHANNELS];
+let channelCache = {};
+let refreshTimer;
+let countdownVal = REFRESH_INTERVAL;
+let isLoading = false;
+
+// 날짜 초기화 (KST 기준 오늘)
+const dateInput = document.getElementById('dateInput');
+function todayKST() {
+  const now = new Date();
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().split('T')[0];
+}
+dateInput.value = todayKST();
+
+// 채널 패널 토글
+function togglePanel() {
+  const p = document.getElementById('channelPanel');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  renderChannelTags();
+}
+
+function renderChannelTags() {
+  const el = document.getElementById('channelTags');
+  el.innerHTML = channels.map((ch, i) => `
+    <div class="channel-tag">
+      <span>${ch}</span>
+      <span class="remove" onclick="removeChannel(${i})">✕</span>
+    </div>
+  `).join('');
+}
+
+function removeChannel(i) {
+  channels.splice(i, 1);
+  saveChannels();
+  renderChannelTags();
+  loadAll();
+}
+
+function addChannel() {
+  const input = document.getElementById('newChannelInput');
+  let val = input.value.trim();
+  if (!val) return;
+  if (!val.startsWith('@')) val = '@' + val;
+  if (!channels.includes(val)) {
+    channels.push(val);
+    saveChannels();
+    renderChannelTags();
+    loadAll();
+  }
+  input.value = '';
+}
+
+function saveChannels() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(channels));
+}
+
+// API 호출
+async function fetchJSON(url) {
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!res.ok) {
+    const msg = data?.error?.message || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+
+async function getChannelInfo(handle) {
+  if (channelCache[handle]) return channelCache[handle];
+  const cleanHandle = handle.replace('@', '');
+  const data = await fetchJSON(
+    `https://www.googleapis.com/youtube/v3/channels?part=contentDetails,snippet&forHandle=${encodeURIComponent(cleanHandle)}&key=${API_KEY}`
+  );
+  if (!data.items?.length) throw new Error(`채널을 찾을 수 없음`);
+  const ch = data.items[0];
+  const info = {
+    name: ch.snippet.title,
+    playlistId: ch.contentDetails.relatedPlaylists.uploads,
+  };
+  channelCache[handle] = info;
+  return info;
+}
+
+// 날짜 문자열을 KST로 변환
+function getKSTDateStr(isoString) {
+  const d = new Date(new Date(isoString).getTime() + 9 * 3600 * 1000);
+  return d.toISOString().split('T')[0];
+}
+
+async function getVideosOnDate(playlistId, dateStr) {
+  const data = await fetchJSON(
+    `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${playlistId}&maxResults=50&key=${API_KEY}`
+  );
+  if (!data.items) return [];
+  return data.items
+    .filter(item => getKSTDateStr(item.snippet.publishedAt) === dateStr)
+    .map(item => ({
+      id: item.snippet.resourceId.videoId,
+      title: item.snippet.title,
+      thumbnail: item.snippet.thumbnails?.medium?.url || '',
+      publishedAt: new Date(item.snippet.publishedAt),
+    }));
+}
+
+async function getViewCounts(videoIds) {
+  if (!videoIds.length) return {};
+  const statsMap = {};
+  for (let i = 0; i < videoIds.length; i += 50) {
+    const chunk = videoIds.slice(i, i + 50).join(',');
+    const data = await fetchJSON(
+      `https://www.googleapis.com/youtube/v3/videos?part=statistics&id=${chunk}&key=${API_KEY}`
+    );
+    for (const item of data.items || []) {
+      statsMap[item.id] = parseInt(item.statistics.viewCount || 0, 10);
+    }
+  }
+  return statsMap;
+}
+
+// 포맷
+function fmtViews(n) {
+  if (n >= 100000000) return (n / 100000000).toFixed(1) + '억';
+  if (n >= 10000)     return Math.round(n / 10000) + '만';
+  if (n >= 1000)      return (n / 1000).toFixed(1) + '천';
+  return n.toLocaleString();
+}
+
+function timeAgo(date) {
+  const m = Math.floor((Date.now() - date) / 60000);
+  if (m < 60)   return m + '분 전';
+  if (m < 1440) return Math.floor(m / 60) + '시간 전';
+  return Math.floor(m / 1440) + '일 전';
+}
+
+// 메인 로드
+async function loadAll() {
+  if (isLoading) return;
+  if (!API_KEY) { showApiSetup(); return; }
+  isLoading = true;
+
+  const dateStr = dateInput.value;
+  const contentEl  = document.getElementById('content');
+  const summaryEl  = document.getElementById('summaryBar');
+  const refreshBtn = document.getElementById('refreshBtn');
+
+  refreshBtn.disabled = true;
+  contentEl.innerHTML = `<div class="loading"><div class="spinner"></div><div>${dateStr} 영상 수집 중...</div></div>`;
+  summaryEl.textContent = '';
+
+  const allVideos = [];
+  const errors = [];
+
+  for (const handle of channels) {
+    try {
+      const info = await getChannelInfo(handle);
+      const videos = await getVideosOnDate(info.playlistId, dateStr);
+      videos.forEach(v => allVideos.push({ ...v, channelName: info.name }));
+    } catch (e) {
+      errors.push(`${handle}: ${e.message}`);
+    }
+  }
+
+  // 조회수 일괄 조회
+  if (allVideos.length) {
+    const ids = allVideos.map(v => v.id);
+    const statsMap = await getViewCounts(ids);
+    allVideos.forEach(v => { v.views = statsMap[v.id] ?? 0; });
+  }
+
+  allVideos.sort((a, b) => b.views - a.views);
+
+  // 업데이트 시각
+  const now = new Date();
+  document.getElementById('lastUpdated').textContent =
+    `업데이트: ${now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+
+  summaryEl.textContent = `📹 총 ${allVideos.length}개 영상  ·  ${channels.length}개 채널  ·  ${dateStr}`;
+
+  // 렌더
+  let html = '<div class="video-list">';
+
+  if (errors.length) {
+    html += `<div class="error-box">⚠️ 오류: ${errors.join(' &nbsp;|&nbsp; ')}</div>`;
+  }
+
+  if (!allVideos.length) {
+    html += `<div class="empty">📭 ${dateStr}에 업로드된 영상이 없습니다.</div>`;
+  } else {
+    allVideos.forEach((v, i) => {
+      const n = i + 1;
+      const rankClass = n === 1 ? 'gold' : n === 2 ? 'silver' : n === 3 ? 'bronze' : '';
+      const rankLabel = n === 1 ? '🥇' : n === 2 ? '🥈' : n === 3 ? '🥉' : n;
+      html += `
+        <div class="video-card">
+          <div class="rank ${rankClass}">${rankLabel}</div>
+          <img class="thumb" src="${v.thumbnail}" alt="" loading="lazy" onerror="this.style.background='#1e1e1e';this.style.display='block'">
+          <div class="info">
+            <div class="channel-badge">${v.channelName}</div>
+            <div class="video-title">
+              <a href="https://www.youtube.com/watch?v=${v.id}" target="_blank" rel="noopener">${v.title}</a>
+            </div>
+            <div class="stats">
+              <span class="views">👁 ${fmtViews(v.views)}</span>
+              <span>🕐 ${timeAgo(v.publishedAt)}</span>
+              <button onclick="sendToAlphacut('${v.id}')" title="URL 복사 + 알파컷 열기" style="margin-left:auto; background:#2a1a2e; border:1px solid #4a2a52; color:#d090e0; border-radius:6px; padding:3px 10px; cursor:pointer; font-size:0.72rem;">✂️ 알파컷</button>
+            </div>
+          </div>
+        </div>`;
+    });
+  }
+
+  html += '</div>';
+  contentEl.innerHTML = html;
+
+  refreshBtn.disabled = false;
+  isLoading = false;
+  resetCountdown();
+}
+
+// 카운트다운
+function resetCountdown() {
+  clearInterval(refreshTimer);
+  countdownVal = REFRESH_INTERVAL;
+  const el = document.getElementById('countdown');
+  refreshTimer = setInterval(() => {
+    countdownVal--;
+    const m = Math.floor(countdownVal / 60);
+    const s = countdownVal % 60;
+    el.textContent = `다음 갱신까지 ${m}:${String(s).padStart(2, '0')}`;
+    if (countdownVal <= 0) loadAll();
+  }, 1000);
+}
+
+// 초기 실행
+if (API_KEY) {
+  loadAll();
+} else {
+  showApiSetup();
+  document.getElementById('content').innerHTML =
+    '<div class="empty">🔑 우측 상단 ⚙️ 에서 YouTube API 키를 입력하면 시작됩니다.</div>';
+}
+</script>
+</body>
+</html>
