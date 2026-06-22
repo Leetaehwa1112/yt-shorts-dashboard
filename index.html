@@ -289,6 +289,7 @@ const STORAGE_KEY = 'yt_dashboard_channels';
 const REFRESH_INTERVAL = 30 * 60; // 30분 (초)
 const VIDEO_CACHE_KEY = 'yt_video_cache';
 const CACHE_TTL_MS = REFRESH_INTERVAL * 1000;
+const CH_INFO_CACHE_KEY = 'yt_ch_info_cache'; // 채널 메타(playlistId) 영구 캐시
 
 // API 키 설정 (코드에 박지 않고 브라우저에 저장)
 function showApiSetup() {
@@ -425,19 +426,27 @@ async function fetchJSON(url) {
   return data;
 }
 
+function getChInfoStore() {
+  try { return JSON.parse(localStorage.getItem(CH_INFO_CACHE_KEY) || '{}'); } catch { return {}; }
+}
+
 async function getChannelInfo(handle) {
+  // 1) 세션 메모리 캐시
   if (channelCache[handle]) return channelCache[handle];
+  // 2) localStorage 영구 캐시 (API 키 변경 전까지 유효 — playlistId는 불변)
+  const store = getChInfoStore();
+  if (store[handle]) { channelCache[handle] = store[handle]; return store[handle]; }
+  // 3) API 호출 (최초 1회만)
   const cleanHandle = handle.replace('@', '');
   const data = await fetchJSON(
     `https://www.googleapis.com/youtube/v3/channels?part=contentDetails,snippet&forHandle=${encodeURIComponent(cleanHandle)}&key=${API_KEY}`
   );
   if (!data.items?.length) throw new Error(`채널을 찾을 수 없음`);
   const ch = data.items[0];
-  const info = {
-    name: ch.snippet.title,
-    playlistId: ch.contentDetails.relatedPlaylists.uploads,
-  };
+  const info = { name: ch.snippet.title, playlistId: ch.contentDetails.relatedPlaylists.uploads };
   channelCache[handle] = info;
+  store[handle] = info;
+  try { localStorage.setItem(CH_INFO_CACHE_KEY, JSON.stringify(store)); } catch {}
   return info;
 }
 
@@ -601,15 +610,18 @@ async function loadAll(forceRefresh = false) {
   const allVideos = [];
   const errors = [];
 
-  for (const handle of channels) {
-    try {
+  // 21개 채널 동시 병렬 fetch
+  const settled = await Promise.allSettled(
+    channels.map(async handle => {
       const info = await getChannelInfo(handle);
       const videos = await getVideosOnDate(info.playlistId, dateStr);
-      videos.forEach(v => allVideos.push({ ...v, channelName: info.name }));
-    } catch (e) {
-      errors.push(`${handle}: ${e.message}`);
-    }
-  }
+      return videos.map(v => ({ ...v, channelName: info.name }));
+    })
+  );
+  settled.forEach((r, i) => {
+    if (r.status === 'fulfilled') allVideos.push(...r.value);
+    else errors.push(`${channels[i]}: ${r.reason?.message || r.reason}`);
+  });
 
   // 조회수 일괄 조회
   if (allVideos.length) {
