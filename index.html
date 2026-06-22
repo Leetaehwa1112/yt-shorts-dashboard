@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>채널 영상 순위</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -332,11 +335,12 @@ const DEFAULT_CHANNELS = [
   '@취재편의점',          // 장윤선의 취재편의점
   '@handoozani',         // 한두자니S2
   '@sisaineditor',       // 시사IN
+  '@youngheefriends',    // 노영희티비(영친이들)
   '@백운기의정어리tv',     // 백운기의 정어리TV
 ];
 
 // 목록 버전: 올리면 기존 브라우저도 이 기본 목록으로 1회 갱신됨
-const CHANNELS_VERSION = '2026-06-22-v2';
+const CHANNELS_VERSION = '2026-06-22-v3';
 
 let channels;
 (function initChannels() {
