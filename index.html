@@ -390,7 +390,7 @@ function setPeriod(p) {
   [1, 7, 30].forEach(n =>
     document.getElementById(`btn${n}d`).classList.toggle('active', n === p)
   );
-  loadAll(true);
+  loadAll(false); // 캐시 우선: 마스터가 덮으면 API 호출 없이 파생
 }
 
 // 채널 패널 토글
