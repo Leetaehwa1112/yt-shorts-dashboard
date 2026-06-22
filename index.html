@@ -225,6 +225,15 @@
       cursor: pointer; padding: 0; text-decoration: underline;
     }
     .toggle-panel-btn:hover { color: #aaa; }
+
+    .period-tabs { display: flex; gap: 6px; }
+    .period-btn {
+      background: #1a1a1a; border: 1px solid #2e2e2e; color: #666;
+      padding: 6px 16px; border-radius: 6px; cursor: pointer;
+      font-size: 0.82rem; font-weight: 600; transition: all 0.15s;
+    }
+    .period-btn:hover { border-color: #444; color: #aaa; }
+    .period-btn.active { background: #ff2d2d; border-color: #ff2d2d; color: #fff; }
   </style>
 </head>
 <body>
@@ -259,8 +268,11 @@
 </div>
 
 <div class="controls">
-  <label>날짜</label>
-  <input type="date" id="dateInput" onchange="loadAll()">
+  <div class="period-tabs">
+    <button class="period-btn active" id="btn1d" onclick="setPeriod(1)">오늘</button>
+    <button class="period-btn" id="btn7d" onclick="setPeriod(7)">7일</button>
+    <button class="period-btn" id="btn30d" onclick="setPeriod(30)">30일</button>
+  </div>
   <button class="toggle-panel-btn" onclick="togglePanel()">채널 관리 ▾</button>
 </div>
 
@@ -363,15 +375,23 @@ let channelCache = {};
 let refreshTimer;
 let countdownVal = REFRESH_INTERVAL;
 let isLoading = false;
+let currentPeriod = 1; // 1 | 7 | 30
 
-// 날짜 초기화 (KST 기준 오늘)
-const dateInput = document.getElementById('dateInput');
 function todayKST() {
-  const now = new Date();
-  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const kst = new Date(Date.now() + 9 * 3600 * 1000);
   return kst.toISOString().split('T')[0];
 }
-dateInput.value = todayKST();
+function daysAgoKST(n) {
+  const kst = new Date(Date.now() + 9 * 3600 * 1000 - n * 86400 * 1000);
+  return kst.toISOString().split('T')[0];
+}
+function setPeriod(p) {
+  currentPeriod = p;
+  [1, 7, 30].forEach(n =>
+    document.getElementById(`btn${n}d`).classList.toggle('active', n === p)
+  );
+  loadAll(true);
+}
 
 // 채널 패널 토글
 function togglePanel() {
@@ -455,19 +475,27 @@ function getKSTDateStr(isoString) {
   return d.toISOString().split('T')[0];
 }
 
-async function getVideosOnDate(playlistId, dateStr) {
-  const data = await fetchJSON(
-    `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${playlistId}&maxResults=50&key=${API_KEY}`
-  );
-  if (!data.items) return [];
-  return data.items
-    .filter(item => getKSTDateStr(item.snippet.publishedAt) === dateStr)
-    .map(item => ({
-      id: item.snippet.resourceId.videoId,
-      title: item.snippet.title,
-      thumbnail: item.snippet.thumbnails?.medium?.url || '',
-      publishedAt: new Date(item.snippet.publishedAt),
-    }));
+async function getVideosInRange(playlistId, fromDate, toDate) {
+  const videos = [];
+  let pageToken = null;
+  do {
+    let url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${playlistId}&maxResults=50&key=${API_KEY}`;
+    if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
+    const data = await fetchJSON(url);
+    let done = false;
+    for (const item of data.items || []) {
+      const d = getKSTDateStr(item.snippet.publishedAt);
+      if (d < fromDate) { done = true; break; }
+      if (d <= toDate) videos.push({
+        id: item.snippet.resourceId.videoId,
+        title: item.snippet.title,
+        thumbnail: item.snippet.thumbnails?.medium?.url || '',
+        publishedAt: new Date(item.snippet.publishedAt),
+      });
+    }
+    pageToken = done ? null : data.nextPageToken;
+  } while (pageToken && videos.length < 500);
+  return videos;
 }
 
 async function getViewCounts(videoIds) {
@@ -501,10 +529,15 @@ function timeAgo(date) {
 }
 
 // 영상 캐시 저장/로드
-function saveVideoCache(dateStr, videos, errors) {
+function getCacheKey() {
+  const today = todayKST();
+  return currentPeriod === 1 ? today : `${currentPeriod}d-${today}`;
+}
+
+function saveVideoCache(videos, errors) {
   try {
     localStorage.setItem(VIDEO_CACHE_KEY, JSON.stringify({
-      date: dateStr,
+      key: getCacheKey(),
       channelsKey: channels.join(','),
       fetchedAt: Date.now(),
       videos: videos.map(v => ({ ...v, publishedAt: v.publishedAt.toISOString() })),
@@ -513,27 +546,26 @@ function saveVideoCache(dateStr, videos, errors) {
   } catch(e) {}
 }
 
-function loadVideoCache(dateStr) {
+function loadVideoCache() {
   try {
     const raw = localStorage.getItem(VIDEO_CACHE_KEY);
     if (!raw) return null;
     const c = JSON.parse(raw);
-    if (c.date !== dateStr) return null;        // 날짜 다르면 miss
-    if (c.channelsKey !== channels.join(',')) return null; // 채널 바뀌면 miss
-    // 같은 날이면 시간 무관하게 캐시 사용 (탭 껐다켰다해도 재fetch 없음)
+    if (c.key !== getCacheKey()) return null;
+    if (c.channelsKey !== channels.join(',')) return null;
     const elapsed = Date.now() - c.fetchedAt;
     const remainingSec = Math.max(0, Math.floor((CACHE_TTL_MS - elapsed) / 1000));
     return {
       videos: c.videos.map(v => ({ ...v, publishedAt: new Date(v.publishedAt) })),
       errors: c.errors || [],
       fetchedAt: c.fetchedAt,
-      remainingSec, // 0이면 resetCountdown이 즉시 백그라운드 갱신 트리거
+      remainingSec,
     };
   } catch(e) { return null; }
 }
 
 // 렌더 (캐시/신규 공통)
-function renderResult(allVideos, dateStr, errors, fetchedAtMs) {
+function renderResult(allVideos, errors, fetchedAtMs) {
   const contentEl  = document.getElementById('content');
   const summaryEl  = document.getElementById('summaryBar');
   const refreshBtn = document.getElementById('refreshBtn');
@@ -542,14 +574,15 @@ function renderResult(allVideos, dateStr, errors, fetchedAtMs) {
   document.getElementById('lastUpdated').textContent =
     `업데이트: ${ts.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
 
-  summaryEl.textContent = `📹 총 ${allVideos.length}개 영상  ·  ${channels.length}개 채널  ·  ${dateStr}`;
+  const periodLabel = currentPeriod === 1 ? '오늘' : `최근 ${currentPeriod}일`;
+  summaryEl.textContent = `📹 총 ${allVideos.length}개 영상  ·  ${channels.length}개 채널  ·  ${periodLabel}`;
 
   let html = '<div class="video-list">';
   if (errors.length) {
     html += `<div class="error-box">⚠️ 오류: ${errors.join(' &nbsp;|&nbsp; ')}</div>`;
   }
   if (!allVideos.length) {
-    html += `<div class="empty">📭 ${dateStr}에 업로드된 영상이 없습니다.</div>`;
+    html += `<div class="empty">📭 ${periodLabel} 업로드된 영상이 없습니다.</div>`;
   } else {
     allVideos.forEach((v, i) => {
       const n = i + 1;
@@ -585,17 +618,18 @@ async function loadAll(forceRefresh = false) {
   if (isLoading) return;
   if (!API_KEY) { showApiSetup(); return; }
 
-  const dateStr = dateInput.value;
-
-  // 캐시 히트: 30분 이내 같은 날짜+채널목록 데이터면 API 호출 없이 바로 렌더
   if (!forceRefresh) {
-    const cached = loadVideoCache(dateStr);
+    const cached = loadVideoCache();
     if (cached) {
-      renderResult(cached.videos, dateStr, cached.errors, cached.fetchedAt);
+      renderResult(cached.videos, cached.errors, cached.fetchedAt);
       resetCountdown(cached.remainingSec);
       return;
     }
   }
+
+  const toDate   = todayKST();
+  const fromDate = daysAgoKST(currentPeriod - 1);
+  const periodLabel = currentPeriod === 1 ? '오늘' : `최근 ${currentPeriod}일`;
 
   isLoading = true;
   const contentEl  = document.getElementById('content');
@@ -603,7 +637,7 @@ async function loadAll(forceRefresh = false) {
   const refreshBtn = document.getElementById('refreshBtn');
 
   refreshBtn.disabled = true;
-  contentEl.innerHTML = `<div class="loading"><div class="spinner"></div><div>${dateStr} 영상 수집 중...</div></div>`;
+  contentEl.innerHTML = `<div class="loading"><div class="spinner"></div><div>${periodLabel} 영상 수집 중...</div></div>`;
   summaryEl.textContent = '';
 
   const allVideos = [];
@@ -613,7 +647,7 @@ async function loadAll(forceRefresh = false) {
   const settled = await Promise.allSettled(
     channels.map(async handle => {
       const info = await getChannelInfo(handle);
-      const videos = await getVideosOnDate(info.playlistId, dateStr);
+      const videos = await getVideosInRange(info.playlistId, fromDate, toDate);
       return videos.map(v => ({ ...v, channelName: info.name }));
     })
   );
@@ -639,8 +673,8 @@ async function loadAll(forceRefresh = false) {
   allVideos.splice(30); // 탑 30개만 유지
 
   const fetchedAt = Date.now();
-  saveVideoCache(dateStr, allVideos, errors);
-  renderResult(allVideos, dateStr, errors, fetchedAt);
+  saveVideoCache(allVideos, errors);
+  renderResult(allVideos, errors, fetchedAt);
   resetCountdown();
 }
 
