@@ -528,16 +528,13 @@ function timeAgo(date) {
   return Math.floor(m / 1440) + '일 전';
 }
 
-// 영상 캐시 저장/로드
-function getCacheKey() {
-  const today = todayKST();
-  return currentPeriod === 1 ? today : `${currentPeriod}d-${today}`;
-}
-
-function saveVideoCache(videos, errors) {
+// 마스터 캐시: 당일 받은 "가장 넓은 기간" 영상 전체를 1벌만 저장.
+// 오늘/7일/30일은 이 마스터에서 잘라내 보여줌 → 탭 전환 시 API 호출 0.
+function saveMaster(periodCovered, videos, errors) {
   try {
     localStorage.setItem(VIDEO_CACHE_KEY, JSON.stringify({
-      key: getCacheKey(),
+      day: todayKST(),
+      periodCovered,
       channelsKey: channels.join(','),
       fetchedAt: Date.now(),
       videos: videos.map(v => ({ ...v, publishedAt: v.publishedAt.toISOString() })),
@@ -546,22 +543,29 @@ function saveVideoCache(videos, errors) {
   } catch(e) {}
 }
 
-function loadVideoCache() {
+function loadMaster() {
   try {
     const raw = localStorage.getItem(VIDEO_CACHE_KEY);
     if (!raw) return null;
     const c = JSON.parse(raw);
-    if (c.key !== getCacheKey()) return null;
-    if (c.channelsKey !== channels.join(',')) return null;
-    const elapsed = Date.now() - c.fetchedAt;
-    const remainingSec = Math.max(0, Math.floor((CACHE_TTL_MS - elapsed) / 1000));
+    if (c.day !== todayKST()) return null;                  // 다음 날이면 miss
+    if (c.channelsKey !== channels.join(',')) return null;  // 채널 바뀌면 miss
     return {
+      periodCovered: c.periodCovered || 1,
       videos: c.videos.map(v => ({ ...v, publishedAt: new Date(v.publishedAt) })),
       errors: c.errors || [],
       fetchedAt: c.fetchedAt,
-      remainingSec,
     };
   } catch(e) { return null; }
+}
+
+// 영상 집합에서 특정 기간(일수)의 탑 30개 잘라내기 (API 호출 없음)
+function derivePeriod(videos, period) {
+  const fromDate = daysAgoKST(period - 1);
+  return videos
+    .filter(v => getKSTDateStr(v.publishedAt.toISOString()) >= fromDate)
+    .sort((a, b) => b.views - a.views)
+    .slice(0, 30);
 }
 
 // 렌더 (캐시/신규 공통)
@@ -618,17 +622,22 @@ async function loadAll(forceRefresh = false) {
   if (isLoading) return;
   if (!API_KEY) { showApiSetup(); return; }
 
+  // 마스터 캐시가 현재 기간을 이미 포함하면 → API 호출 없이 잘라서 렌더
   if (!forceRefresh) {
-    const cached = loadVideoCache();
-    if (cached) {
-      renderResult(cached.videos, cached.errors, cached.fetchedAt);
-      resetCountdown(cached.remainingSec);
+    const master = loadMaster();
+    if (master && master.periodCovered >= currentPeriod) {
+      renderResult(derivePeriod(master.videos, currentPeriod), master.errors, master.fetchedAt);
+      const remaining = Math.max(0, Math.floor((CACHE_TTL_MS - (Date.now() - master.fetchedAt)) / 1000));
+      resetCountdown(remaining);
       return;
     }
   }
 
+  // fetch 필요: 마스터가 줄어들지 않게 "현재 기간"과 "기존 마스터 기간" 중 넓은 쪽을 받음
+  const existing = loadMaster();
+  const fetchPeriod = Math.max(currentPeriod, existing ? existing.periodCovered : 0);
   const toDate   = todayKST();
-  const fromDate = daysAgoKST(currentPeriod - 1);
+  const fromDate = daysAgoKST(fetchPeriod - 1);
   const periodLabel = currentPeriod === 1 ? '오늘' : `최근 ${currentPeriod}일`;
 
   isLoading = true;
@@ -669,12 +678,10 @@ async function loadAll(forceRefresh = false) {
     allVideos.forEach(v => { v.views = statsMap[v.id] ?? 0; });
   }
 
-  allVideos.sort((a, b) => b.views - a.views);
-  allVideos.splice(30); // 탑 30개만 유지
-
+  // 마스터엔 전체 보관(잘라내지 않음), 화면엔 현재 기간 탑 30만 표시
   const fetchedAt = Date.now();
-  saveVideoCache(allVideos, errors);
-  renderResult(allVideos, errors, fetchedAt);
+  saveMaster(fetchPeriod, allVideos, errors);
+  renderResult(derivePeriod(allVideos, currentPeriod), errors, fetchedAt);
   resetCountdown();
 }
 
